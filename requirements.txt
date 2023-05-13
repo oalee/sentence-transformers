@@ -9,3 +9,5 @@ scipy
 nltk
 sentencepiece
 huggingface-hub
+vaex
+pandas

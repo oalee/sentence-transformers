@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 from torch.utils.data import Dataset
 from typing import List
@@ -7,6 +8,7 @@ import numpy as np
 import nltk
 from nltk.tokenize.treebank import TreebankWordDetokenizer
 import vaex
+import tqdm
 
 
 class DenoisingAutoEncoderDataset(Dataset):
@@ -48,19 +50,26 @@ class DenoisingAutoEncoderDataset(Dataset):
 
 
 class ListedDenoisingAutoEncoderDataset(Dataset):
-    def __init__(self, file_paths: List[str], noise_fn=lambda s: DenoisingAutoEncoderDataset.delete(s), chunk_size=10_000_000, max_chunks=1_000_000):
+    def __init__(self, file_paths: List[str], noise_fn=lambda s: DenoisingAutoEncoderDataset.delete(s), chunk_size=10_000_000, max_chunks=1_000_000, num_workers=32):
         self.file_paths = file_paths
         self.noise_fn = noise_fn
+        self.num_workers = num_workers
         self.file_lengths = self.compute_file_lengths()
         self.chunk_size = chunk_size
         self.max_chunks = max_chunks
         self.cache = OrderedDict()
 
+    def compute_length(self, file_path):
+        df = vaex.open(file_path)
+        return len(df)
+
     def compute_file_lengths(self):
         lengths = []
-        for file_path in self.file_paths:
-            df = vaex.open(file_path)
-            lengths.append(len(df))
+        with ThreadPoolExecutor(self.num_workers) as executor:
+            futures = {executor.submit(self.compute_length, file_path)
+                       for file_path in self.file_paths}
+            for future in tqdm.tqdm(as_completed(futures), total=len(futures)):
+                lengths.append(future.result())
         return lengths
 
     def find_file_and_row(self, idx):
