@@ -65,18 +65,24 @@ class ListedDenoisingAutoEncoderDataset(Dataset):
 
     def compute_file_lengths(self):
         lengths = []
+
+        print("Computing file lengths...")
+        print("Total number of files:", len(self.file_paths))
+
         with ThreadPoolExecutor(self.num_workers) as executor:
-            futures = {executor.submit(self.compute_length, file_path)
+            futures = {file_path: executor.submit(self.compute_length, file_path)
                        for file_path in self.file_paths}
-            for future in tqdm.tqdm(as_completed(futures), total=len(futures)):
+            for file_path in tqdm.tqdm(self.file_paths):
+                future = futures[file_path]
                 lengths.append(future.result())
         return lengths
 
     def find_file_and_row(self, idx):
         for file_idx, file_length in enumerate(self.file_lengths):
-            if idx < file_length:
+            if idx < file_length:  # idx is within current file
                 return file_idx, idx
             idx -= file_length
+        # If idx is still non-zero after going through all files, then it's out of range
         raise IndexError("Index out of range")
 
     def get_sentence(self, idx):
@@ -96,6 +102,12 @@ class ListedDenoisingAutoEncoderDataset(Dataset):
         else:
             self.cache.move_to_end(cache_key)  # update the access order
 
+            # Check if the row index is within the length of the file
+        # if row_idx >= len(self.cache[cache_key]):
+        #     import ipdb
+        #     ipdb.set_trace()
+        #     raise IndexError("Row index out of range")
+
         # row_idx now directly indexes into the file, no modulo operation
         return self.cache[cache_key][row_idx]
 
@@ -106,7 +118,7 @@ class ListedDenoisingAutoEncoderDataset(Dataset):
     def __len__(self):
         return sum(self.file_lengths)
 
-    @staticmethod
+    @ staticmethod
     def delete(text, del_ratio=0.6):
         words = nltk.word_tokenize(text)
         n = len(words)
