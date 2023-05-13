@@ -1,5 +1,6 @@
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 import pandas as pd
 from torch.utils.data import Dataset
 from typing import List
@@ -58,6 +59,7 @@ class ListedDenoisingAutoEncoderDataset(Dataset):
         # self.chunk_size = chunk_size
         self.max_chunks = max_chunks
         self.cache = OrderedDict()
+        self.locks = {}
 
     def compute_length(self, file_path):
         df = vaex.open(file_path)
@@ -92,24 +94,52 @@ class ListedDenoisingAutoEncoderDataset(Dataset):
         cache_key = file_idx  # Now cache_key is only dependent on file_idx
 
         if cache_key not in self.cache:
-            if len(self.cache) >= self.max_chunks:
-                # remove the least recently used (LRU) file
-                self.cache.popitem(last=False)
-
-            # Now read the whole file into cache, no chunking
-            df = vaex.open(file_path)
-            self.cache[cache_key] = df['text'].tolist()
+            self.cache[cache_key] = vaex.open(file_path)['text'].tolist()
         else:
             self.cache.move_to_end(cache_key)  # update the access order
 
-            # Check if the row index is within the length of the file
-        # if row_idx >= len(self.cache[cache_key]):
-        #     import ipdb
-        #     ipdb.set_trace()
-        #     raise IndexError("Row index out of range")
+        if len(self.cache) >= self.max_chunks:
+            # Remove the least recently used (LRU) file
+            self.cache.popitem(last=False)
 
-        # row_idx now directly indexes into the file, no modulo operation
+        for i in range(1, 10):  # prefetch next 5 files
+            next_file_idx = file_idx + i
+            if next_file_idx < len(self.file_paths) and next_file_idx not in self.cache:
+                if next_file_idx not in self.locks:
+                    self.locks[next_file_idx] = threading.Lock()
+                threading.Thread(target=self.load_file_into_cache,
+                                 args=(next_file_idx,)).start()
+
         return self.cache[cache_key][row_idx]
+
+    def load_file_into_cache(self, file_idx):
+        with self.locks[file_idx]:
+            if file_idx not in self.cache:
+                # Check if cache is full
+
+                file_path = self.file_paths[file_idx]
+                df = vaex.open(file_path)
+                self.cache[file_idx] = df['text'].tolist()
+
+        # if cache_key not in self.cache:
+        #     if len(self.cache) >= self.max_chunks:
+        #         # remove the least recently used (LRU) file
+        #         self.cache.popitem(last=False)
+
+        #     # Now read the whole file into cache, no chunking
+        #     df = vaex.open(file_path)
+        #     self.cache[cache_key] = df['text'].tolist()
+        # else:
+        #     self.cache.move_to_end(cache_key)  # update the access order
+        # # Start prefetching next file(s) if not already in cache
+
+        # next_file_idx = file_idx + 1
+        # if next_file_idx < len(self.file_paths) and next_file_idx not in self.cache:
+        #     threading.Thread(target=self.load_file_into_cache,
+        #                      args=(next_file_idx,)).start()
+
+        # # row_idx now directly indexes into the file, no modulo operation
+        # return self.cache[cache_key][row_idx]
 
     def __getitem__(self, item):
         sent = self.get_sentence(item)
