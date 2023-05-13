@@ -50,12 +50,12 @@ class DenoisingAutoEncoderDataset(Dataset):
 
 
 class ListedDenoisingAutoEncoderDataset(Dataset):
-    def __init__(self, file_paths: List[str], noise_fn=lambda s: DenoisingAutoEncoderDataset.delete(s), chunk_size=10_000_000, max_chunks=1_000_000, num_workers=32):
+    def __init__(self, file_paths: List[str], noise_fn=lambda s: DenoisingAutoEncoderDataset.delete(s), max_chunks=1_000_000, num_workers=32):
         self.file_paths = file_paths
         self.noise_fn = noise_fn
         self.num_workers = num_workers
         self.file_lengths = self.compute_file_lengths()
-        self.chunk_size = chunk_size
+        # self.chunk_size = chunk_size
         self.max_chunks = max_chunks
         self.cache = OrderedDict()
 
@@ -83,27 +83,21 @@ class ListedDenoisingAutoEncoderDataset(Dataset):
         file_idx, row_idx = self.find_file_and_row(idx)
         file_path = self.file_paths[file_idx]
 
-        chunk_idx = row_idx // self.chunk_size
-        cache_key = (file_idx, chunk_idx)
+        cache_key = file_idx  # Now cache_key is only dependent on file_idx
 
         if cache_key not in self.cache:
             if len(self.cache) >= self.max_chunks:
-                # remove the least recently used (LRU) chunk
+                # remove the least recently used (LRU) file
                 self.cache.popitem(last=False)
 
-            start = chunk_idx * self.chunk_size
-            end = min((chunk_idx + 1) * self.chunk_size,
-                      self.file_lengths[file_idx])
-            # self.cache[cache_key] = pd.read_parquet(file_path, skiprows=range(
-            #     1, start + 1), nrows=(end - start), encoding='utf8')['text'].tolist()
-        #             start = chunk_idx * self.chunk_size
-        # end = min((chunk_idx + 1) * self.chunk_size, self.file_lengths[file_idx])
+            # Now read the whole file into cache, no chunking
             df = vaex.open(file_path)
-            self.cache[cache_key] = df['text'][start:end].tolist()
+            self.cache[cache_key] = df['text'].tolist()
         else:
             self.cache.move_to_end(cache_key)  # update the access order
 
-        return self.cache[cache_key][row_idx % self.chunk_size]
+        # row_idx now directly indexes into the file, no modulo operation
+        return self.cache[cache_key][row_idx]
 
     def __getitem__(self, item):
         sent = self.get_sentence(item)
