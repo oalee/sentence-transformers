@@ -102,7 +102,7 @@ class ListedDenoisingAutoEncoderDataset(Dataset):
             # Remove the least recently used (LRU) file
             self.cache.popitem(last=False)
 
-        for i in range(1, 10):  # prefetch next 5 files
+        for i in range(1, 100):  # prefetch next 5 files
             next_file_idx = file_idx + i
             if next_file_idx < len(self.file_paths) and next_file_idx not in self.cache:
                 if next_file_idx not in self.locks:
