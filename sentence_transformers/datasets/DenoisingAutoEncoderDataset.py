@@ -143,7 +143,14 @@ class ListedDenoisingAutoEncoderDataset(Dataset):
 
     def __getitem__(self, item):
         sent = self.get_sentence(item)
-        return InputExample(texts=[self.noise_fn(sent), sent])
+        try:
+            return InputExample(texts=[self.noise_fn(sent), sent])
+        except:
+            import ipdb
+            ipdb.set_trace()
+            sent = self.get_sentence(item)
+            sent = self.get_sentence(item-1)
+            return InputExample(texts=[self.noise_fn(sent), sent])
 
     def __len__(self):
         return sum(self.file_lengths)
